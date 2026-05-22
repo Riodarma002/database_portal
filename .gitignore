@@ -1,0 +1,35 @@
+# ============================================================
+# .gitignore untuk MGE Portal - Streamlit App
+# ============================================================
+
+# WAJIB: Jangan pernah commit file secrets!
+.streamlit/secrets.toml
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Virtual environment
+venv/
+.venv/
+env/
+.env
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.temp
