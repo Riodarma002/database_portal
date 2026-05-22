@@ -17,7 +17,7 @@ def get_base64_of_bin_file(bin_file):
     return base64.b64encode(data).decode()
 
 def add_login_css():
-    img_path = os.path.join(BASE_DIR, "__pycache__", "pexels-julia-fuchs-19936537-6851359.jpg")
+    img_path = os.path.join(BASE_DIR, ".streamlit", "bg_login.jpg")
     try:
         bin_str = get_base64_of_bin_file(img_path)
         bg_css = f"background-image: url('data:image/jpeg;base64,{bin_str}');"
