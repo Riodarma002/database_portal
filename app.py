@@ -228,7 +228,7 @@ def clear_all_cache():
     
     fetch_fuel_data.clear()
     get_unique_vendors_fuel.clear()
-    get_unique_unit_types_fuel.clear()
+    get_unique_units_fuel.clear()
     get_unique_locations_fuel.clear()
     
     get_ob_unique_pits.clear()
