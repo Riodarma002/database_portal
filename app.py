@@ -878,12 +878,17 @@ elif menu == "Modul Coal Hauling":
                     st.write("Membaca file Excel (Sheet: Timbangan)...")
                     try:
                         import numpy as np
-                        # Header di baris ke-4 (index 3)
+                        # Coba baca dengan asumsi header di baris ke-4 (index 3) seperti template awal
                         df_upload = pd.read_excel(uploaded_file, sheet_name='Timbangan', header=3)
-                        
-                        st.write("Menjalankan Auto-Validator...")
-                        # 1. Bersihkan nama kolom (lowercase, konversi semua jenis spasi/newline/tab menjadi underscore)
                         df_upload.columns = df_upload.columns.astype(str).str.lower().str.strip().str.replace(r'\s+', '_', regex=True)
+                        
+                        # Jika tidak ketemu, kemungkinan user mengupload file yang baris atasnya sudah dihapus (header di baris 1)
+                        if 'voucher_number' not in df_upload.columns:
+                            uploaded_file.seek(0) # Reset pointer file
+                            df_upload = pd.read_excel(uploaded_file, sheet_name='Timbangan', header=0)
+                            df_upload.columns = df_upload.columns.astype(str).str.lower().str.strip().str.replace(r'\s+', '_', regex=True)
+                            
+                        st.write("Menjalankan Auto-Validator...")
                         
                         # 2. Kolom database yang diharapkan
                         db_cols = ['jml', 'day', 'date', 'shift', 'loading_date', 'voucher_number', 'pit', 'block', 'seam', 'product', 'concat', 'vendor', 'unit_type', 'unit_id', 'payload_arrival_time', 'payload_embark_time', 'weight_gross', 'weight_empty', 'weight_nett', 'destination', 'route', 'loader_id', 'tonage']
@@ -891,6 +896,10 @@ elif menu == "Modul Coal Hauling":
                         # 3. Filter hanya kolom yang relevan & buang baris kosong
                         available_cols = [c for c in db_cols if c in df_upload.columns]
                         df_insert = df_upload[available_cols].copy()
+                        
+                        if 'voucher_number' not in df_insert.columns:
+                            raise ValueError("Kolom 'Voucher Number' tidak ditemukan! Pastikan header tabel berada di baris ke-4 dan namanya sesuai template.")
+                            
                         df_insert.dropna(subset=['voucher_number'], inplace=True)
                         
                         # 4. Format Tanggal YYYY-MM-DD
