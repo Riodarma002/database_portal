@@ -955,6 +955,10 @@ elif menu == "Modul Coal Hauling":
 
                             # 3. Filter hanya kolom yang relevan & buang baris kosong
                             available_cols = [c for c in db_cols if c in df_upload.columns]
+                            missing_cols = [col for col in db_cols if col not in df_upload.columns]
+                            if missing_cols:
+                                st.error(f"❌ Upload Ditolak! Ada kolom wajib yang tidak ditemukan atau namanya salah ketik di Modul Hauling: {', '.join(missing_cols)}")
+                                st.stop()
                             df_insert = df_upload[available_cols].copy()
 
                             if 'voucher_number' not in df_insert.columns:
@@ -1196,8 +1200,10 @@ elif menu == "Modul Coal Hauling":
                             db_cols_t = ['date', 'shift', 'unit_code', 'model', 'type', 'brand', 'user', 'seam', 'block', 'product_code', 'product_inv', 'pit', 'digger', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', 'total', 'vessel', 'netto', 'periode', 'room']
                             
                             avail_cols_t = [c for c in db_cols_t if c in df_up_t.columns]
-                            if len(avail_cols_t) < 5:
-                                raise ValueError("Tidak bisa menemukan kolom-kolom standar Transit di Excel ini. Pastikan format tabelnya sesuai.")
+                            missing_cols_t = [col for col in db_cols_t if col not in df_up_t.columns]
+                            if missing_cols_t:
+                                st.error(f"❌ Upload Ditolak! Ada kolom wajib yang tidak ditemukan atau namanya salah ketik di Modul Transit: {', '.join(missing_cols_t)}")
+                                st.stop()
                                 
                             df_ins_t = df_up_t[avail_cols_t].copy()
                             
@@ -1511,7 +1517,14 @@ elif menu == "Modul Overburden (OB)":
                                     else:
                                         error_msgs.append(f"Gagal execute batch untuk tabel {table}.")
                                 except Exception as e:
-                                    error_msgs.append(f"Gagal memproses sheet {sheet}: {e}")
+                                    err_str = str(e)
+                                    if "Unknown column" in err_str:
+                                        import re
+                                        match = re.search(r"Unknown column '(.*?)'", err_str)
+                                        col_name = match.group(1) if match else "yang tidak dikenali"
+                                        error_msgs.append(f"❌ Upload Ditolak pada sheet '{sheet}'! Kolom '{col_name}' tidak terdaftar di database atau salah ketik.")
+                                    else:
+                                        error_msgs.append(f"Gagal memproses sheet {sheet}: {e}")
                             else:
                                 error_msgs.append(f"Sheet '{sheet}' tidak dikenali, diabaikan.")
                         
@@ -1754,6 +1767,10 @@ elif menu == "Modul Fuel":
                         db_cols = ['unit_fix', 'date', 'periode', 'shift', 'time', 'reg_no', 'unit_code', 'unit_model', 'unit_type', 'brand', 'vendor', 'alocation', 'km', 'hm', 'fm_awal', 'fm_akhir', 'refueling', 'source', 'location', 'operator', 'fuelman', 'no_voucher']
                         
                         available_cols = [c for c in db_cols if c in df_upload.columns]
+                        missing_cols = [col for col in db_cols if col not in df_upload.columns]
+                        if missing_cols:
+                            st.error(f"❌ Upload Ditolak! Ada kolom wajib yang tidak ditemukan atau namanya salah ketik di Modul Fuel: {', '.join(missing_cols)}")
+                            st.stop()
                         df_insert = df_upload[available_cols].copy()
                         if 'no_voucher' in df_insert.columns:
                             df_insert.dropna(subset=['no_voucher'], inplace=True)
