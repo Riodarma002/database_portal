@@ -1749,6 +1749,7 @@ elif menu == "Modul Fuel":
                         
                         st.write("Menjalankan Auto-Validator...")
                         df_upload.columns = df_upload.columns.astype(str).str.lower().str.strip().str.replace(r'\s+', '_', regex=True)
+                        df_upload.rename(columns={'unit_code_fix': 'unit_fix'}, inplace=True)
                         
                         db_cols = ['unit_fix', 'date', 'periode', 'shift', 'time', 'reg_no', 'unit_code', 'unit_model', 'unit_type', 'brand', 'vendor', 'alocation', 'km', 'hm', 'fm_awal', 'fm_akhir', 'refueling', 'source', 'location', 'operator', 'fuelman', 'no_voucher']
                         
