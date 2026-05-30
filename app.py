@@ -194,6 +194,53 @@ def get_unique_pits():
         return ["Semua"] + df['pit'].tolist()
     return ["Semua"]
 
+
+
+@st.cache_data(ttl=600)
+def get_unique_transit_pits():
+    df = database.fetch_data("SELECT DISTINCT pit FROM coal_transit WHERE pit IS NOT NULL AND pit != '' ORDER BY pit")
+    if not df.empty:
+        return ["Semua"] + df['pit'].tolist()
+    return ["Semua"]
+
+@st.cache_data(ttl=600)
+def get_unique_transit_diggers():
+    df = database.fetch_data("SELECT DISTINCT digger FROM coal_transit WHERE digger IS NOT NULL AND digger != '' ORDER BY digger")
+    if not df.empty:
+        return ["Semua"] + df['digger'].tolist()
+    return ["Semua"]
+
+@st.cache_data(ttl=600)
+def get_unique_transit_unit_codes():
+    df = database.fetch_data("SELECT DISTINCT unit_code FROM coal_transit WHERE unit_code IS NOT NULL AND unit_code != '' ORDER BY unit_code")
+    if not df.empty:
+        return ["Semua"] + df['unit_code'].tolist()
+    return ["Semua"]
+
+@st.cache_data(ttl=600)
+def fetch_transit_data(date_start=None, date_end=None):
+    query = """
+    SELECT id, date, shift, unit_code, model, type, brand, user, seam, block, product_code, product_inv, pit, digger, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, total, vessel, netto, periode, room 
+    FROM coal_transit 
+    WHERE 1=1
+    """
+    params = []
+    
+    if date_start and date_end:
+        query += " AND date BETWEEN %s AND %s"
+        params.extend([date_start, date_end])
+    elif date_start:
+        query += " AND date = %s"
+        params.append(date_start)
+    
+    if date_start:
+        query += " ORDER BY date DESC, id DESC"
+    else:
+        query += " ORDER BY date DESC, id DESC LIMIT 1000"
+    
+    return database.fetch_data(query, tuple(params) if params else None)
+
+
 @st.cache_data(ttl=600)
 def fetch_hauling_data(date_start=None, date_end=None):
     """Mengambil data hauling dari database. Di-cache berdasarkan rentang tanggal.
@@ -698,290 +745,534 @@ if menu == "Dashboard Utama":
 
 
 elif menu == "Modul Coal Hauling":
-    st.title("Modul Coal Hauling")
-    st.markdown("Sinkronisasi data produksi batubara (Coal Hauling).")
+    st.title("Modul Coal Hauling & Transit")
+    st.markdown("Sinkronisasi data produksi batubara (Coal Hauling dan Coal Transit).")
     
-    tab1, tab2, tab3 = st.tabs([":material/monitoring: View Data", ":material/cloud_upload: Upload / Import", ":material/delete_sweep: Rollback / Delete Batch"])
+    sub_menu = option_menu(
+        menu_title=None,
+        options=["Coal Hauling", "Coal Transit"],
+        icons=["truck", "arrow-left-right"],
+        default_index=0,
+        orientation="horizontal",
+        styles={
+            "container": {"padding": "0!important", "margin-bottom": "20px"},
+            "nav-link-selected": {"background-color": "#1F4E78"}
+        }
+    )
+    
+    if sub_menu == "Coal Hauling":
+        tab1, tab2, tab3 = st.tabs([":material/monitoring: View Data", ":material/cloud_upload: Upload / Import", ":material/delete_sweep: Rollback / Delete Batch"])
 
-    with tab1:
-        
-        with st.expander(":material/filter_alt: Filter & Cari Data", expanded=True):
-            cols = st.columns([1.5, 0.9, 1, 1, 1, 1.2, 0.7, 0.5, 0.8])
-            with cols[0]:
-                f_date = st.date_input("Tanggal", value=[])
-            with cols[1]:
-                f_shift = st.selectbox("Shift", ["Semua", "DAY", "NIGHT"])
-            with cols[2]:
-                f_pit = st.selectbox("Pit", get_unique_pits())
-            with cols[3]:
-                f_vendor = st.selectbox("Vendor", get_unique_vendors())
-            with cols[4]:
-                f_unit = st.selectbox("Unit", get_unique_unit_types())
-            with cols[5]:
-                f_search = st.text_input("Pencarian", placeholder="Voucher/ID...")
-            with cols[6]:
-                st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
-                btn_search = st.button(":material/search: Cari", type="primary", use_container_width=True)
-            with cols[7]:
-                st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
-                if st.button(":material/refresh:", use_container_width=True, help="Tarik ulang data segar dari database"):
-                    clear_all_cache()
-                    st.rerun()
-            with cols[8]:
-                download_placeholder = st.container()
+        with tab1:
 
-        # =====================================================================
-        # OPTIMASI: SQL hanya dipanggil saat tanggal berubah (cached).
-        # Filter Shift/Pit/Vendor/Unit/Search dikerjakan client-side via Pandas.
-        # =====================================================================
-        date_start = f_date[0] if len(f_date) >= 1 else None
-        date_end = f_date[1] if len(f_date) >= 2 else None
-        
-        with st.spinner("Mengambil data..."):
-            df = fetch_hauling_data(date_start, date_end)
-        
-        # Filter client-side (INSTAN, tanpa query SQL ulang)
-        if not df.empty:
-            if f_shift != "Semua":
-                df = df[df['shift'] == f_shift]
-            if f_pit != "Semua":
-                df = df[df['pit'] == f_pit]
-            if f_vendor != "Semua":
-                df = df[df['vendor'] == f_vendor]
-            if f_unit != "Semua":
-                df = df[df['unit_type'] == f_unit]
-            if f_search:
-                mask = df.astype(str).apply(lambda x: x.str.contains(f_search, case=False, na=False)).any(axis=1)
-                df = df[mask]
-            
-        if not df.empty:
-            # Perbaiki format timedelta dari MySQL agar tampil sebagai HH:MM:SS
-            for col in ['payload_arrival_time', 'payload_embark_time']:
-                if col in df.columns:
-                    df[col] = df[col].astype(str).apply(lambda x: x.split()[-1] if x != 'NaT' and x != 'None' else '')
-            
-            # Pastikan kolom berat adalah angka (float) agar bisa diformat dengan tepat
-            for num_col in ['weight_gross', 'weight_empty', 'weight_nett', 'tonage']:
-                if num_col in df.columns:
-                    df[num_col] = pd.to_numeric(df[num_col], errors='coerce')
-                    # Jika data ter-upload dalam format kg (ribuan), normalisasi kembali ke desimal ton
-                    if num_col != 'tonage':
-                        df[num_col] = df[num_col].apply(lambda x: x / 1000 if pd.notnull(x) and x >= 1000 else x)
-                    
-            # Pastikan kolom tanggal berformat datetime agar bisa diatur tampilannya
-            for date_col in ['date', 'loading_date']:
-                if date_col in df.columns:
-                    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-                    
-            # -------------------------------------------------------------
-            # Tombol Download Custom untuk memastikan format Excel sempurna
-            # -------------------------------------------------------------
-            df_export = df.copy()
-            # Kunci 3 angka di belakang koma (tanpa pembulatan aneh dari Pandas)
-            for col in ['weight_gross', 'weight_empty', 'weight_nett']:
-                if col in df_export.columns:
-                    df_export[col] = df_export[col].apply(lambda x: f"{float(x):.3f}" if pd.notnull(x) else "")
-            # Kunci 2 angka di belakang koma untuk tonase
-            if 'tonage' in df_export.columns:
-                df_export['tonage'] = df_export['tonage'].apply(lambda x: f"{float(x):.2f}" if pd.notnull(x) else "")
-            
-            # Format tanggal juga dikembalikan ke format kalender normal
-            for d_col in ['date', 'loading_date']:
-                if d_col in df_export.columns:
-                    df_export[d_col] = df_export[d_col].dt.strftime('%d/%m/%Y').fillna("")
+            with st.expander(":material/filter_alt: Filter & Cari Data", expanded=True):
+                cols = st.columns([1.5, 0.9, 1, 1, 1, 1.2, 0.7, 0.5, 0.8])
+                with cols[0]:
+                    f_date = st.date_input("Tanggal", value=[])
+                with cols[1]:
+                    f_shift = st.selectbox("Shift", ["Semua", "DAY", "NIGHT"])
+                with cols[2]:
+                    f_pit = st.selectbox("Pit", get_unique_pits())
+                with cols[3]:
+                    f_vendor = st.selectbox("Vendor", get_unique_vendors())
+                with cols[4]:
+                    f_unit = st.selectbox("Unit", get_unique_unit_types())
+                with cols[5]:
+                    f_search = st.text_input("Pencarian", placeholder="Voucher/ID...")
+                with cols[6]:
+                    st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
+                    btn_search = st.button(":material/search: Cari", type="primary", use_container_width=True)
+                with cols[7]:
+                    st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
+                    if st.button(":material/refresh:", use_container_width=True, help="Tarik ulang data segar dari database"):
+                        clear_all_cache()
+                        st.rerun()
+                with cols[8]:
+                    download_placeholder = st.container()
 
-            import io
-            from openpyxl.styles import PatternFill, Font, Alignment
-            
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_export.to_excel(writer, index=False, sheet_name='Data Hauling')
-                
-                # Mengambil worksheet untuk pewarnaan
-                workbook = writer.book
-                worksheet = writer.sheets['Data Hauling']
-                
-                # Mewarnai Header (Biru gelap dengan teks putih)
-                header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
-                header_font = Font(color="FFFFFF", bold=True)
-                
-                for cell in worksheet[1]:  # Baris 1 adalah header
-                    cell.fill = header_fill
-                    cell.font = header_font
-                    cell.alignment = Alignment(horizontal="center", vertical="center")
-                    
-                # Proteksi Performa: Hanya lakukan styling/pewarnaan zebra jika data di bawah 2000 baris
-                if len(df_export) <= 2000:
-                    # Mewarnai baris selang-seling (Zebra striping - abu pucat)
-                    gray_fill = PatternFill(start_color="F4F6F9", end_color="F4F6F9", fill_type="solid")
-                    for row_idx in range(2, worksheet.max_row + 1):
-                        if row_idx % 2 == 0:
-                            for col_idx in range(1, worksheet.max_column + 1):
-                                worksheet.cell(row=row_idx, column=col_idx).fill = gray_fill
-                        
-                    # Menyesuaikan lebar kolom secara otomatis
-                    for col in worksheet.columns:
-                        max_length = 0
-                        column_letter = col[0].column_letter
-                        for cell in col:
-                            try:
-                                if len(str(cell.value)) > max_length:
-                                    max_length = len(str(cell.value))
-                            except:
-                                pass
-                        worksheet.column_dimensions[column_letter].width = min(max_length + 2, 40) # Maksimal lebar 40
+            # =====================================================================
+            # OPTIMASI: SQL hanya dipanggil saat tanggal berubah (cached).
+            # Filter Shift/Pit/Vendor/Unit/Search dikerjakan client-side via Pandas.
+            # =====================================================================
+            date_start = f_date[0] if len(f_date) >= 1 else None
+            date_end = f_date[1] if len(f_date) >= 2 else None
 
-            excel_data = output.getvalue()
-            
-            # Menempatkan tombol download ke dalam placeholder di samping tombol Cari
-            with download_placeholder:
-                st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
-                st.download_button(
-                    label=":material/download: Excel",
-                    data=excel_data,
-                    file_name=f"Report_Hauling_{time.strftime('%Y%m%d')}.xlsx",
-                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    use_container_width=True
+            with st.spinner("Mengambil data..."):
+                df = fetch_hauling_data(date_start, date_end)
+
+            # Filter client-side (INSTAN, tanpa query SQL ulang)
+            if not df.empty:
+                if f_shift != "Semua":
+                    df = df[df['shift'] == f_shift]
+                if f_pit != "Semua":
+                    df = df[df['pit'] == f_pit]
+                if f_vendor != "Semua":
+                    df = df[df['vendor'] == f_vendor]
+                if f_unit != "Semua":
+                    df = df[df['unit_type'] == f_unit]
+                if f_search:
+                    mask = df.astype(str).apply(lambda x: x.str.contains(f_search, case=False, na=False)).any(axis=1)
+                    df = df[mask]
+
+            if not df.empty:
+                # Perbaiki format timedelta dari MySQL agar tampil sebagai HH:MM:SS
+                for col in ['payload_arrival_time', 'payload_embark_time']:
+                    if col in df.columns:
+                        df[col] = df[col].astype(str).apply(lambda x: x.split()[-1] if x != 'NaT' and x != 'None' else '')
+
+                # Pastikan kolom berat adalah angka (float) agar bisa diformat dengan tepat
+                for num_col in ['weight_gross', 'weight_empty', 'weight_nett', 'tonage']:
+                    if num_col in df.columns:
+                        df[num_col] = pd.to_numeric(df[num_col], errors='coerce')
+                        # Jika data ter-upload dalam format kg (ribuan), normalisasi kembali ke desimal ton
+                        if num_col != 'tonage':
+                            df[num_col] = df[num_col].apply(lambda x: x / 1000 if pd.notnull(x) and x >= 1000 else x)
+
+                # Pastikan kolom tanggal berformat datetime agar bisa diatur tampilannya
+                for date_col in ['date', 'loading_date']:
+                    if date_col in df.columns:
+                        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+
+                # -------------------------------------------------------------
+                # Tombol Download Custom untuk memastikan format Excel sempurna
+                # -------------------------------------------------------------
+                df_export = df.copy()
+                # Kunci 3 angka di belakang koma (tanpa pembulatan aneh dari Pandas)
+                for col in ['weight_gross', 'weight_empty', 'weight_nett']:
+                    if col in df_export.columns:
+                        df_export[col] = df_export[col].apply(lambda x: f"{float(x):.3f}" if pd.notnull(x) else "")
+                # Kunci 2 angka di belakang koma untuk tonase
+                if 'tonage' in df_export.columns:
+                    df_export['tonage'] = df_export['tonage'].apply(lambda x: f"{float(x):.2f}" if pd.notnull(x) else "")
+
+                # Format tanggal juga dikembalikan ke format kalender normal
+                for d_col in ['date', 'loading_date']:
+                    if d_col in df_export.columns:
+                        df_export[d_col] = df_export[d_col].dt.strftime('%d/%m/%Y').fillna("")
+
+                import io
+                from openpyxl.styles import PatternFill, Font, Alignment
+
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df_export.to_excel(writer, index=False, sheet_name='Data Hauling')
+
+                    # Mengambil worksheet untuk pewarnaan
+                    workbook = writer.book
+                    worksheet = writer.sheets['Data Hauling']
+
+                    # Mewarnai Header (Biru gelap dengan teks putih)
+                    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+                    header_font = Font(color="FFFFFF", bold=True)
+
+                    for cell in worksheet[1]:  # Baris 1 adalah header
+                        cell.fill = header_fill
+                        cell.font = header_font
+                        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+                    # Proteksi Performa: Hanya lakukan styling/pewarnaan zebra jika data di bawah 2000 baris
+                    if len(df_export) <= 2000:
+                        # Mewarnai baris selang-seling (Zebra striping - abu pucat)
+                        gray_fill = PatternFill(start_color="F4F6F9", end_color="F4F6F9", fill_type="solid")
+                        for row_idx in range(2, worksheet.max_row + 1):
+                            if row_idx % 2 == 0:
+                                for col_idx in range(1, worksheet.max_column + 1):
+                                    worksheet.cell(row=row_idx, column=col_idx).fill = gray_fill
+
+                        # Menyesuaikan lebar kolom secara otomatis
+                        for col in worksheet.columns:
+                            max_length = 0
+                            column_letter = col[0].column_letter
+                            for cell in col:
+                                try:
+                                    if len(str(cell.value)) > max_length:
+                                        max_length = len(str(cell.value))
+                                except:
+                                    pass
+                            worksheet.column_dimensions[column_letter].width = min(max_length + 2, 40) # Maksimal lebar 40
+
+                excel_data = output.getvalue()
+
+                # Menempatkan tombol download ke dalam placeholder di samping tombol Cari
+                with download_placeholder:
+                    st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
+                    st.download_button(
+                        label=":material/download: Excel",
+                        data=excel_data,
+                        file_name=f"Report_Hauling_{time.strftime('%Y%m%d')}.xlsx",
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        use_container_width=True
+                    )
+
+                # Ubah header menjadi kapital semua agar terlihat lebih tebal/bold
+                col_cfg = {
+                    "weight_gross": st.column_config.NumberColumn("WEIGHT GROSS", format="%.3f"),
+                    "weight_empty": st.column_config.NumberColumn("WEIGHT EMPTY", format="%.3f"),
+                    "weight_nett": st.column_config.NumberColumn("WEIGHT NETT", format="%.3f"),
+                    "tonage": st.column_config.NumberColumn("TONAGE", format="%.2f"),
+                    "date": st.column_config.DateColumn("DATE", format="DD/MM/YYYY"),
+                    "loading_date": st.column_config.DateColumn("LOADING DATE", format="DD/MM/YYYY")
+                }
+                # Kapitalisasi sisa kolom lainnya
+                for c in df.columns:
+                    if c not in col_cfg:
+                        col_cfg[c] = st.column_config.Column(c.upper().replace('_', ' '))
+
+                st.dataframe(
+                    df, 
+                    use_container_width=True, 
+                    hide_index=True, 
+                    height=700,
+                    column_config=col_cfg
                 )
-            
-            # Ubah header menjadi kapital semua agar terlihat lebih tebal/bold
-            col_cfg = {
-                "weight_gross": st.column_config.NumberColumn("WEIGHT GROSS", format="%.3f"),
-                "weight_empty": st.column_config.NumberColumn("WEIGHT EMPTY", format="%.3f"),
-                "weight_nett": st.column_config.NumberColumn("WEIGHT NETT", format="%.3f"),
-                "tonage": st.column_config.NumberColumn("TONAGE", format="%.2f"),
-                "date": st.column_config.DateColumn("DATE", format="DD/MM/YYYY"),
-                "loading_date": st.column_config.DateColumn("LOADING DATE", format="DD/MM/YYYY")
-            }
-            # Kapitalisasi sisa kolom lainnya
-            for c in df.columns:
-                if c not in col_cfg:
-                    col_cfg[c] = st.column_config.Column(c.upper().replace('_', ' '))
+            else:
+                st.info("Data hauling tidak ditemukan. Silakan ubah filter Anda.")
 
-            st.dataframe(
-                df, 
-                use_container_width=True, 
-                hide_index=True, 
-                height=700,
-                column_config=col_cfg
-            )
-        else:
-            st.info("Data hauling tidak ditemukan. Silakan ubah filter Anda.")
-
-    with tab2:
-        st.header("Update Data via Upload Excel")
-        st.info("Pilih file `DAILY COAL HAULING MASTER REKAP.xlsx`")
-        uploaded_file = st.file_uploader("Upload File Excel Hauling", type=["xlsx", "xlsb", "xls"], key="hauling")
-        if uploaded_file is not None:
-            if st.button(":material/cloud_upload: Import ke Server", type="primary"):
-                with st.status("Memproses Import...", expanded=True) as status:
-                    st.write("Membaca file Excel (Sheet: Timbangan)...")
-                    try:
-                        import numpy as np
-                        # Coba baca dengan asumsi header di baris ke-4 (index 3) seperti template awal
-                        df_upload = pd.read_excel(uploaded_file, sheet_name='Timbangan', header=3)
-                        df_upload.columns = df_upload.columns.astype(str).str.lower().str.strip().str.replace(r'\s+', '_', regex=True)
-                        
-                        # Jika tidak ketemu, kemungkinan user mengupload file yang baris atasnya sudah dihapus (header di baris 1)
-                        if 'voucher_number' not in df_upload.columns:
-                            uploaded_file.seek(0) # Reset pointer file
-                            df_upload = pd.read_excel(uploaded_file, sheet_name='Timbangan', header=0)
+        with tab2:
+            st.header("Update Data via Upload Excel")
+            st.info("Pilih file `DAILY COAL HAULING MASTER REKAP.xlsx`")
+            uploaded_file = st.file_uploader("Upload File Excel Hauling", type=["xlsx", "xlsb", "xls"], key="hauling")
+            if uploaded_file is not None:
+                if st.button(":material/cloud_upload: Import ke Server", type="primary"):
+                    with st.status("Memproses Import...", expanded=True) as status:
+                        st.write("Membaca file Excel (Sheet: Timbangan)...")
+                        try:
+                            import numpy as np
+                            # Coba baca dengan asumsi header di baris ke-4 (index 3) seperti template awal
+                            df_upload = pd.read_excel(uploaded_file, sheet_name='Timbangan', header=3)
                             df_upload.columns = df_upload.columns.astype(str).str.lower().str.strip().str.replace(r'\s+', '_', regex=True)
+
+                            # Jika tidak ketemu, kemungkinan user mengupload file yang baris atasnya sudah dihapus (header di baris 1)
+                            if 'voucher_number' not in df_upload.columns:
+                                uploaded_file.seek(0) # Reset pointer file
+                                df_upload = pd.read_excel(uploaded_file, sheet_name='Timbangan', header=0)
+                                df_upload.columns = df_upload.columns.astype(str).str.lower().str.strip().str.replace(r'\s+', '_', regex=True)
+
+                            st.write("Menjalankan Auto-Validator...")
+
+                            # 2. Kolom database yang diharapkan
+                            db_cols = ['jml', 'day', 'date', 'shift', 'loading_date', 'voucher_number', 'pit', 'block', 'seam', 'product', 'concat', 'vendor', 'unit_type', 'unit_id', 'payload_arrival_time', 'payload_embark_time', 'weight_gross', 'weight_empty', 'weight_nett', 'destination', 'route', 'loader_id', 'tonage']
+
+                            # 3. Filter hanya kolom yang relevan & buang baris kosong
+                            available_cols = [c for c in db_cols if c in df_upload.columns]
+                            df_insert = df_upload[available_cols].copy()
+
+                            if 'voucher_number' not in df_insert.columns:
+                                raise ValueError("Kolom 'Voucher Number' tidak ditemukan! Pastikan header tabel berada di baris ke-4 dan namanya sesuai template.")
+
+                            df_insert.dropna(subset=['voucher_number'], inplace=True)
+
+                            # 4. Format Tanggal YYYY-MM-DD
+                            if 'date' in df_insert.columns:
+                                df_insert['date'] = pd.to_datetime(df_insert['date'], errors='coerce').dt.strftime('%Y-%m-%d')
+                            if 'loading_date' in df_insert.columns:
+                                df_insert['loading_date'] = pd.to_datetime(df_insert['loading_date'], errors='coerce').dt.strftime('%Y-%m-%d')
+
+                            # 5. Parsing Time
+                            for t_col in ['payload_arrival_time', 'payload_embark_time']:
+                                if t_col in df_insert.columns:
+                                    df_insert[t_col] = df_insert[t_col].astype(str).apply(lambda x: x.split()[-1] if x not in ['NaT', 'nan', 'None'] else None)
+
+                            # 6. Bersihkan NaN menjadi None untuk MySQL
+                            df_insert = df_insert.replace({np.nan: None, pd.NaT: None, 'nan': None})
+
+                            st.write(f"Mempersiapkan {len(df_insert)} baris untuk diimport...")
+
+                            # 7. Eksekusi Batch INSERT IGNORE
+                            placeholders = ", ".join(["%s"] * len(available_cols))
+                            cols_str = ", ".join(available_cols)
+                            query_insert = f"INSERT IGNORE INTO coal_hauling ({cols_str}) VALUES ({placeholders})"
+
+                            data_to_insert = [tuple(x) for x in df_insert.to_numpy()]
+
+                            st.write("Mengimport batch data ke MySQL...")
+                            success = database.execute_many_query(query_insert, data_to_insert)
+
+                            if success:
+                                status.update(label="Import Selesai!", state="complete", expanded=False)
+                                st.success(f"{len(df_insert)} Data Hauling berhasil diproses (duplikat diabaikan)!")
+                                clear_all_cache()  # Hapus semua cache agar data segar
+                                time.sleep(2)
+                                if "hauling" in st.session_state:
+                                    del st.session_state["hauling"]
+                                st.rerun()
+                            else:
+                                status.update(label="Import Gagal!", state="error", expanded=True)
+                        except Exception as e:
+                            status.update(label="Terjadi Kesalahan", state="error", expanded=True)
+                            st.error(f"Error membaca/mengunggah Excel: {e}")
+
+        with tab3:
+            st.header("Rollback / Delete Batch")
+            st.error("⚠️ Data yang dihapus tidak bisa dikembalikan. Gunakan hanya jika ada revisi salah ketik Excel.")
+
+            c1, c2 = st.columns(2)
+            del_date = c1.date_input("Pilih Tanggal yang Salah (Bisa Range)", value=[], key="h_date")
+            del_shift = c2.selectbox("Pilih Shift", ["Semua", "DAY", "NIGHT"], key="h_shift")
+
+            confirm_del = st.checkbox("Saya yakin ingin menghapus data secara permanen", key="h_confirm")
+
+            if st.button(":material/delete_sweep: Hapus Batch Hauling", type="primary", disabled=not confirm_del):
+                if not del_date:
+                    st.warning("Silakan pilih tanggal terlebih dahulu.")
+                else:
+                    params = []
+                    query = "DELETE FROM coal_hauling WHERE "
+
+                    if len(del_date) == 2:
+                        query += "date BETWEEN %s AND %s"
+                        params.extend([del_date[0], del_date[1]])
+                    elif len(del_date) == 1:
+                        query += "date = %s"
+                        params.append(del_date[0])
+
+                    if del_shift != "Semua":
+                        query += " AND shift = %s"
+                        params.append(del_shift)
+
+                    if database.execute_query(query, tuple(params)):
+                        st.success("Data berhasil dihapus dari server! Silakan lakukan upload ulang di tab Upload/Import.")
+                        clear_all_cache()  # Hapus semua cache agar data segar
+                        time.sleep(2)
+                        for key in ["h_date", "h_shift", "h_confirm"]:
+                            if key in st.session_state:
+                                del st.session_state[key]
+                        st.rerun()
+                    else:
+                        st.error("Terjadi kegagalan saat menghapus data.")
+
+
+
+    elif sub_menu == "Coal Transit":
+        tab1, tab2, tab3 = st.tabs([":material/monitoring: View Data", ":material/cloud_upload: Upload / Import", ":material/delete_sweep: Rollback / Delete Batch"])
+        
+        with tab1:
+            with st.expander(":material/filter_alt: Filter & Cari Data Transit", expanded=True):
+                cols = st.columns([1.5, 0.9, 1, 1, 1, 1.2, 0.7, 0.5, 0.8])
+                with cols[0]:
+                    f_date = st.date_input("Tanggal Transit", value=[], key="t_date")
+                with cols[1]:
+                    f_shift = st.selectbox("Shift", ["Semua", "DAY", "NIGHT", "Day", "Night"], key="t_shift")
+                with cols[2]:
+                    f_pit = st.selectbox("Pit", get_unique_transit_pits(), key="t_pit")
+                with cols[3]:
+                    f_digger = st.selectbox("Digger", get_unique_transit_diggers(), key="t_digger")
+                with cols[4]:
+                    f_unit = st.selectbox("Unit Code", get_unique_transit_unit_codes(), key="t_unit")
+                with cols[5]:
+                    f_search = st.text_input("Pencarian", placeholder="Ketik kata kunci...", key="t_search")
+                with cols[6]:
+                    st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
+                    btn_search = st.button(":material/search: Cari", type="primary", use_container_width=True, key="t_btn")
+                with cols[7]:
+                    st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
+                    if st.button(":material/refresh:", use_container_width=True, help="Tarik ulang data segar dari database", key="t_ref"):
+                        clear_all_cache()
+                        st.rerun()
+                with cols[8]:
+                    download_placeholder_transit = st.container()
+
+            date_start = f_date[0] if len(f_date) >= 1 else None
+            date_end = f_date[1] if len(f_date) >= 2 else None
+            
+            with st.spinner("Mengambil data..."):
+                df_transit = fetch_transit_data(date_start, date_end)
+            
+            if not df_transit.empty:
+                if f_shift != "Semua":
+                    df_transit = df_transit[df_transit['shift'].str.upper() == f_shift.upper()]
+                if f_pit != "Semua":
+                    df_transit = df_transit[df_transit['pit'] == f_pit]
+                if f_digger != "Semua":
+                    df_transit = df_transit[df_transit['digger'] == f_digger]
+                if f_unit != "Semua":
+                    df_transit = df_transit[df_transit['unit_code'] == f_unit]
+                if f_search:
+                    mask = df_transit.astype(str).apply(lambda x: x.str.contains(f_search, case=False, na=False)).any(axis=1)
+                    df_transit = df_transit[mask]
+                
+            if not df_transit.empty:
+                for date_col in ['date']:
+                    if date_col in df_transit.columns:
+                        df_transit[date_col] = pd.to_datetime(df_transit[date_col], errors='coerce')
+                
+                df_export = df_transit.copy()
+                for d_col in ['date']:
+                    if d_col in df_export.columns:
+                        df_export[d_col] = df_export[d_col].dt.strftime('%d/%m/%Y').fillna("")
+
+                import io
+                from openpyxl.styles import PatternFill, Font, Alignment
+                
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df_export.to_excel(writer, index=False, sheet_name='Data Transit')
+                    workbook = writer.book
+                    worksheet = writer.sheets['Data Transit']
+                    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+                    header_font = Font(color="FFFFFF", bold=True)
+                    for cell in worksheet[1]:
+                        cell.fill = header_fill
+                        cell.font = header_font
+                        cell.alignment = Alignment(horizontal="center", vertical="center")
+                    if len(df_export) <= 2000:
+                        gray_fill = PatternFill(start_color="F4F6F9", end_color="F4F6F9", fill_type="solid")
+                        for row_idx in range(2, worksheet.max_row + 1):
+                            if row_idx % 2 == 0:
+                                for col_idx in range(1, worksheet.max_column + 1):
+                                    worksheet.cell(row=row_idx, column=col_idx).fill = gray_fill
+                        for col in worksheet.columns:
+                            max_length = 0
+                            column_letter = col[0].column_letter
+                            for cell in col:
+                                try:
+                                    if len(str(cell.value)) > max_length:
+                                        max_length = len(str(cell.value))
+                                except: pass
+                            worksheet.column_dimensions[column_letter].width = min(max_length + 2, 40)
+
+                excel_data = output.getvalue()
+                
+                with download_placeholder_transit:
+                    st.markdown("<div style='margin-top:26px;'></div>", unsafe_allow_html=True)
+                    st.download_button(
+                        label=":material/download: Excel",
+                        data=excel_data,
+                        file_name=f"Report_Transit_{time.strftime('%Y%m%d')}.xlsx",
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        use_container_width=True,
+                        key="t_dl"
+                    )
+                
+                col_cfg = {
+                    "date": st.column_config.DateColumn("DATE", format="DD/MM/YYYY")
+                }
+                for c in df_transit.columns:
+                    if c not in col_cfg:
+                        col_cfg[c] = st.column_config.Column(c.upper().replace('_', ' '))
+
+                st.dataframe(
+                    df_transit, 
+                    use_container_width=True, 
+                    hide_index=True, 
+                    height=700,
+                    column_config=col_cfg
+                )
+            else:
+                st.info("Data transit tidak ditemukan. Silakan ubah filter Anda.")
+
+        with tab2:
+            st.header("Update Data via Upload Excel (Transit)")
+            st.info("Pilih file Excel yang mengandung sheet `Transit` atau sheet pertama.")
+            uploaded_file_transit = st.file_uploader("Upload File Excel Transit", type=["xlsx", "xlsb", "xls"], key="up_transit")
+            if uploaded_file_transit is not None:
+                if st.button(":material/cloud_upload: Import ke Server", type="primary", key="btn_up_transit"):
+                    with st.status("Memproses Import Transit...", expanded=True) as status:
+                        st.write("Membaca file Excel...")
+                        try:
+                            import numpy as np
+                            # Mencoba baca sheet 'Transit', kalau gagal baca sheet aktif
+                            try:
+                                df_up_t = pd.read_excel(uploaded_file_transit, sheet_name='Transit', header=None)
+                            except:
+                                uploaded_file_transit.seek(0)
+                                df_up_t = pd.read_excel(uploaded_file_transit, header=None)
                             
-                        st.write("Menjalankan Auto-Validator...")
-                        
-                        # 2. Kolom database yang diharapkan
-                        db_cols = ['jml', 'day', 'date', 'shift', 'loading_date', 'voucher_number', 'pit', 'block', 'seam', 'product', 'concat', 'vendor', 'unit_type', 'unit_id', 'payload_arrival_time', 'payload_embark_time', 'weight_gross', 'weight_empty', 'weight_nett', 'destination', 'route', 'loader_id', 'tonage']
-                        
-                        # 3. Filter hanya kolom yang relevan & buang baris kosong
-                        available_cols = [c for c in db_cols if c in df_upload.columns]
-                        df_insert = df_upload[available_cols].copy()
-                        
-                        if 'voucher_number' not in df_insert.columns:
-                            raise ValueError("Kolom 'Voucher Number' tidak ditemukan! Pastikan header tabel berada di baris ke-4 dan namanya sesuai template.")
+                            st.write("Mencari posisi Header otomatis...")
+                            # Cari baris yang memiliki kata 'unit' atau 'digger' untuk jadi header
+                            header_idx = 0
+                            for idx, row in df_up_t.iterrows():
+                                row_str = " ".join([str(x).lower() for x in row.values])
+                                if 'unit' in row_str and 'digger' in row_str:
+                                    header_idx = idx
+                                    break
                             
-                        df_insert.dropna(subset=['voucher_number'], inplace=True)
-                        
-                        # 4. Format Tanggal YYYY-MM-DD
-                        if 'date' in df_insert.columns:
-                            df_insert['date'] = pd.to_datetime(df_insert['date'], errors='coerce').dt.strftime('%Y-%m-%d')
-                        if 'loading_date' in df_insert.columns:
-                            df_insert['loading_date'] = pd.to_datetime(df_insert['loading_date'], errors='coerce').dt.strftime('%Y-%m-%d')
+                            df_up_t.columns = df_up_t.iloc[header_idx]
+                            df_up_t = df_up_t.iloc[header_idx+1:].reset_index(drop=True)
                             
-                        # 5. Parsing Time
-                        for t_col in ['payload_arrival_time', 'payload_embark_time']:
-                            if t_col in df_insert.columns:
-                                df_insert[t_col] = df_insert[t_col].astype(str).apply(lambda x: x.split()[-1] if x not in ['NaT', 'nan', 'None'] else None)
+                            st.write("Menjalankan Auto-Validator...")
+                            df_up_t.columns = df_up_t.columns.astype(str).str.lower().str.strip().str.replace(r'\s+', '_', regex=True)
+                            
+                            db_cols_t = ['date', 'shift', 'unit_code', 'model', 'type', 'brand', 'user', 'seam', 'block', 'product_code', 'product_inv', 'pit', 'digger', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', 'total', 'vessel', 'netto', 'periode', 'room']
+                            
+                            avail_cols_t = [c for c in db_cols_t if c in df_up_t.columns]
+                            if len(avail_cols_t) < 5:
+                                raise ValueError("Tidak bisa menemukan kolom-kolom standar Transit di Excel ini. Pastikan format tabelnya sesuai.")
+                                
+                            df_ins_t = df_up_t[avail_cols_t].copy()
+                            
+                            # Drop baris kosong yang tidak punya date atau unit_code
+                            if 'date' in df_ins_t.columns and 'unit_code' in df_ins_t.columns:
+                                df_ins_t.dropna(subset=['date', 'unit_code'], how='all', inplace=True)
+                            
+                            if 'date' in df_ins_t.columns:
+                                df_ins_t['date'] = pd.to_datetime(df_ins_t['date'], errors='coerce').dt.strftime('%Y-%m-%d')
+                                
+                            df_ins_t = df_ins_t.replace({np.nan: None, pd.NaT: None, 'nan': None})
+                            
+                            st.write(f"Mempersiapkan {len(df_ins_t)} baris Transit untuk diimport...")
+                            
+                            # Cek kolom yang harus dibungkus dengan backtick (seperti `1`, `2` karena angka)
+                            safe_cols = [f"`{c}`" for c in avail_cols_t]
+                            placeholders = ", ".join(["%s"] * len(avail_cols_t))
+                            cols_str = ", ".join(safe_cols)
+                            
+                            query_insert = f"INSERT IGNORE INTO coal_transit ({cols_str}) VALUES ({placeholders})"
+                            data_to_insert = [tuple(x) for x in df_ins_t.to_numpy()]
+                            
+                            st.write("Mengimport batch data ke MySQL (mencegah duplikat)...")
+                            success = database.execute_many_query(query_insert, data_to_insert)
+                            
+                            if success:
+                                status.update(label="Import Transit Selesai!", state="complete", expanded=False)
+                                st.success(f"{len(df_ins_t)} Data Transit berhasil diproses (duplikat diabaikan)!")
+                                clear_all_cache()
+                                time.sleep(2)
+                                if "up_transit" in st.session_state:
+                                    del st.session_state["up_transit"]
+                                st.rerun()
+                            else:
+                                status.update(label="Import Gagal!", state="error", expanded=True)
+                        except Exception as e:
+                            status.update(label="Terjadi Kesalahan", state="error", expanded=True)
+                            st.error(f"Error membaca/mengunggah Excel Transit: {e}")
+
+        with tab3:
+            st.header("Rollback / Delete Batch (Transit)")
+            st.error("⚠️ Data Transit yang dihapus tidak bisa dikembalikan.")
+            
+            c1, c2 = st.columns(2)
+            del_date = c1.date_input("Pilih Tanggal yang Salah (Bisa Range)", value=[], key="td_date")
+            del_shift = c2.selectbox("Pilih Shift", ["Semua", "DAY", "NIGHT", "Day", "Night"], key="td_shift")
+            
+            confirm_del = st.checkbox("Saya yakin ingin menghapus data Transit secara permanen", key="td_confirm")
+            
+            if st.button(":material/delete_sweep: Hapus Batch Transit", type="primary", disabled=not confirm_del, key="btn_del_transit"):
+                if not del_date:
+                    st.warning("Silakan pilih tanggal terlebih dahulu.")
+                else:
+                    params = []
+                    q = "DELETE FROM coal_transit WHERE "
+                    
+                    if len(del_date) == 2:
+                        q += "date BETWEEN %s AND %s"
+                        params.extend([del_date[0], del_date[1]])
+                    else:
+                        q += "date = %s"
+                        params.append(del_date[0])
                         
-                        # 6. Bersihkan NaN menjadi None untuk MySQL
-                        df_insert = df_insert.replace({np.nan: None, pd.NaT: None, 'nan': None})
+                    if del_shift != "Semua":
+                        q += " AND shift = %s"
+                        params.append(del_shift)
                         
-                        st.write(f"Mempersiapkan {len(df_insert)} baris untuk diimport...")
-                        
-                        # 7. Eksekusi Batch INSERT IGNORE
-                        placeholders = ", ".join(["%s"] * len(available_cols))
-                        cols_str = ", ".join(available_cols)
-                        query_insert = f"INSERT IGNORE INTO coal_hauling ({cols_str}) VALUES ({placeholders})"
-                        
-                        data_to_insert = [tuple(x) for x in df_insert.to_numpy()]
-                        
-                        st.write("Mengimport batch data ke MySQL...")
-                        success = database.execute_many_query(query_insert, data_to_insert)
-                        
-                        if success:
-                            status.update(label="Import Selesai!", state="complete", expanded=False)
-                            st.success(f"{len(df_insert)} Data Hauling berhasil diproses (duplikat diabaikan)!")
-                            clear_all_cache()  # Hapus semua cache agar data segar
+                    with st.spinner("Menghapus data..."):
+                        if database.execute_query(q, tuple(params)):
+                            st.success("Batch Transit berhasil dihapus!")
+                            clear_all_cache()
                             time.sleep(2)
-                            if "hauling" in st.session_state:
-                                del st.session_state["hauling"]
                             st.rerun()
                         else:
-                            status.update(label="Import Gagal!", state="error", expanded=True)
-                    except Exception as e:
-                        status.update(label="Terjadi Kesalahan", state="error", expanded=True)
-                        st.error(f"Error membaca/mengunggah Excel: {e}")
-
-    with tab3:
-        st.header("Rollback / Delete Batch")
-        st.error("⚠️ Data yang dihapus tidak bisa dikembalikan. Gunakan hanya jika ada revisi salah ketik Excel.")
-        
-        c1, c2 = st.columns(2)
-        del_date = c1.date_input("Pilih Tanggal yang Salah (Bisa Range)", value=[], key="h_date")
-        del_shift = c2.selectbox("Pilih Shift", ["Semua", "DAY", "NIGHT"], key="h_shift")
-        
-        confirm_del = st.checkbox("Saya yakin ingin menghapus data secara permanen", key="h_confirm")
-        
-        if st.button(":material/delete_sweep: Hapus Batch Hauling", type="primary", disabled=not confirm_del):
-            if not del_date:
-                st.warning("Silakan pilih tanggal terlebih dahulu.")
-            else:
-                params = []
-                query = "DELETE FROM coal_hauling WHERE "
-                
-                if len(del_date) == 2:
-                    query += "date BETWEEN %s AND %s"
-                    params.extend([del_date[0], del_date[1]])
-                elif len(del_date) == 1:
-                    query += "date = %s"
-                    params.append(del_date[0])
-                    
-                if del_shift != "Semua":
-                    query += " AND shift = %s"
-                    params.append(del_shift)
-                    
-                if database.execute_query(query, tuple(params)):
-                    st.success("Data berhasil dihapus dari server! Silakan lakukan upload ulang di tab Upload/Import.")
-                    clear_all_cache()  # Hapus semua cache agar data segar
-                    time.sleep(2)
-                    for key in ["h_date", "h_shift", "h_confirm"]:
-                        if key in st.session_state:
-                            del st.session_state[key]
-                    st.rerun()
-                else:
-                    st.error("Terjadi kegagalan saat menghapus data.")
-
-
+                            st.error("Gagal menghapus batch Transit.")
 elif menu == "Modul Overburden (OB)":
     st.title("Modul Overburden (OB)")
     st.markdown("Manajemen data pengupasan tanah (Overburden).")
