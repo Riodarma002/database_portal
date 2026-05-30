@@ -1052,7 +1052,7 @@ elif menu == "Modul Coal Hauling":
                 with cols[0]:
                     f_date = st.date_input("Tanggal Transit", value=[], key="t_date")
                 with cols[1]:
-                    f_shift = st.selectbox("Shift", ["Semua", "DAY", "NIGHT", "Day", "Night"], key="t_shift")
+                    f_shift = st.selectbox("Shift", ["Semua", "Day", "Night"], key="t_shift")
                 with cols[2]:
                     f_pit = st.selectbox("Pit", get_unique_transit_pits(), key="t_pit")
                 with cols[3]:
@@ -1243,7 +1243,7 @@ elif menu == "Modul Coal Hauling":
             
             c1, c2 = st.columns(2)
             del_date = c1.date_input("Pilih Tanggal yang Salah (Bisa Range)", value=[], key="td_date")
-            del_shift = c2.selectbox("Pilih Shift", ["Semua", "DAY", "NIGHT", "Day", "Night"], key="td_shift")
+            del_shift = c2.selectbox("Pilih Shift", ["Semua", "Day", "Night"], key="td_shift")
             
             confirm_del = st.checkbox("Saya yakin ingin menghapus data Transit secara permanen", key="td_confirm")
             
