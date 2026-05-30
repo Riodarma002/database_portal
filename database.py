@@ -16,7 +16,7 @@ def _get_db_config():
         "user":     st.secrets["database"]["user"],
         "password": st.secrets["database"]["password"],
         "database": st.secrets["database"]["database"],
-        "connection_timeout": 10,
+        "connection_timeout": 30,
     }
 
 def _new_connection():
